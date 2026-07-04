@@ -90,7 +90,10 @@ export class AgentsCompletionsService {
       return result.content;
     }
     if (Array.isArray(result.content)) {
-      const textPart = result.content.find((part) => part.type === 'text');
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const textPart: { type: string; text?: string } | undefined = result.content.find(
+        (part: { type: string; text?: string }) => part.type === 'text',
+      );
       return textPart && typeof textPart.text === 'string' ? textPart.text : '';
     }
     return '';
@@ -1707,23 +1710,23 @@ export class AgentsCompletionsService {
 
     // Get tools for the current agent mode
     const tools = {
-      ...(this.agentTool.getTools(
+      ...this.agentTool.getTools(
         workspaceId,
         agentMode,
         todosEmitter,
         conversation.id,
-      ) as ToolSet),
-      ...(this.agentTool.getTodoTools(
+      ),
+      ...this.agentTool.getTodoTools(
         conversation.id,
         todosEmitter,
-      ) as ToolSet),
+      ),
       ...(loadSkillTool ? { load_skill: loadSkillTool } : {}),
       // Add memory tools
-      ...(this.agentTool.getMemoryTools(
+      ...this.agentTool.getMemoryTools(
         workspaceId,
         userId,
         conversation.id,
-      ) as ToolSet),
+      ),
     };
 
     // Step 12: Build the combined stream with auto-continuation

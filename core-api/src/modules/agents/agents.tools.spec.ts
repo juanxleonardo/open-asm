@@ -1,4 +1,6 @@
 import * as net from 'node:net';
+import { tool } from 'ai';
+import { z } from 'zod';
 
 function isPrivateV4(ip: string): boolean {
   const parts = ip.split('.').map(Number);
@@ -52,6 +54,24 @@ describe('isPrivateAddress', () => {
       ['100.128.0.1', false],
     ])('should detect %s as private=%s', (ip, expected) => {
       expect(isPrivateAddress(ip)).toBe(expected);
+    });
+  });
+
+  describe('AgentTool — createTool factory', () => {
+    it('should produce tools that have description and execute', () => {
+      const testTool = tool({
+        description: 'Test tool description',
+        inputSchema: z.object({
+          param1: z.string().describe('A test param'),
+        }),
+        execute: (params: { param1: string }) => {
+          return `processed: ${params.param1}`;
+        },
+      });
+
+      expect(testTool).toBeDefined();
+      expect(testTool.description).toBe('Test tool description');
+      expect(typeof testTool.execute).toBe('function');
     });
   });
 

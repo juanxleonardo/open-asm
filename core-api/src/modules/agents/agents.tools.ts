@@ -1,8 +1,8 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any, @typescript-eslint/require-await */
 import type { WrapperType } from '@/common/types/app.types';
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { tool } from 'ai';
+import type { Tool } from 'ai';
 import { randomUUID } from 'node:crypto';
 import * as dns from 'node:dns/promises';
 import * as net from 'node:net';
@@ -21,7 +21,7 @@ import { VulnerabilitiesService } from '@/modules/vulnerabilities/vulnerabilitie
 import { WorkersService } from '@/modules/workers/workers.service';
 
 import { SortOrder } from '@/common/dtos/get-many-base.dto';
-import { AgentMode } from '@/common/enums/enum';
+import { AgentMode, IssueStatus } from '@/common/enums/enum';
 import {
   detailAssetSchema,
   detailIssueSchema,
@@ -47,9 +47,6 @@ import { AgentConversation } from './entities/agent-conversation.entity';
 const webFetchSchema = z.object({
   url: z.string().url().describe('Target URL'),
 });
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ToolType = any;
 
 function isPrivateAddress(address: string): boolean {
   if (net.isIPv4(address)) {
@@ -119,411 +116,341 @@ export class AgentTool {
     private readonly agentsMemories: AgentsMemoriesService,
   ) {}
 
-  get getAssetsTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'List discovered assets (domains, IPs, URLs) in the workspace. Params: page, limit, value (filter text).',
-        parameters: getAssetsSchema,
-        execute: async (params: z.infer<typeof getAssetsSchema>) => {
-          const { page, limit, value } = params;
-          const response = await this.assetsService.getManyAsssetServices(
-            {
-              limit: limit ?? 100,
-              page: page ?? 1,
-              sortBy: 'createdAt',
-              sortOrder: SortOrder.DESC,
-              value,
-            },
-            workspaceId,
-          );
-          return {
-            ...response,
-            data: response.data.map((i) => ({ id: i.id, value: i.value })),
-          };
-        },
-      };
-      return tool(toolConfig);
-    };
-  }
-
-  get getVulnerabilitiesTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'List security vulnerabilities with severity. Params: page, limit, q (search e.g. "XSS", "CVE-2024").',
-        parameters: getVulnerabilitiesSchema,
-        execute: async (params: z.infer<typeof getVulnerabilitiesSchema>) => {
-          const { page, limit, q } = params;
-          const response = await this.vulnerabilitiesService.getVulnerabilities(
-            {
-              limit: limit ?? 100,
-              page: page ?? 1,
-              q,
-              sortBy: 'createdAt',
-              sortOrder: SortOrder.DESC,
-            },
-            workspaceId,
-          );
-          return {
-            ...response,
-            data: response.data.map((i) => ({
-              id: i.id,
-              name: i.name,
-              severity: i.severity,
-            })),
-          };
-        },
-      };
-      return tool(toolConfig);
-    };
-  }
-
-  get getTargetsTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'Show scanning scope (root domains, IP ranges added by user). Params: page, limit, value (filter text).',
-        parameters: getTargetsSchema,
-        execute: async (params: z.infer<typeof getTargetsSchema>) => {
-          const { page, limit, value } = params;
-          const response = await this.targetsService.getTargetsInWorkspace(
-            {
-              limit: limit ?? 100,
-              page: page ?? 1,
-              sortBy: 'createdAt',
-              sortOrder: SortOrder.DESC,
-              value,
-            },
-            workspaceId,
-          );
-          return {
-            ...response,
-            data: response.data.map((i) => ({ id: i.id, value: i.value })),
-          };
-        },
-      };
-      return tool(toolConfig);
-    };
-  }
-
-  get getStatisticsTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'Return security dashboard summary: asset/vulnerability counts, severity breakdown, security score. No params.',
-        parameters: z.object({}),
-        execute: async () =>
-          this.statisticService.getStatistics({ workspaceId }),
-      };
-      return tool(toolConfig);
-    };
-  }
-
-  get detailAssetTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description: 'Get full technical details of a single asset by assetId.',
-        parameters: detailAssetSchema,
-        execute: async (params: z.infer<typeof detailAssetSchema>) => {
-          const { assetId } = params;
-          return this.assetsService.getAssetById(assetId, workspaceId);
-        },
-      };
-      return tool(toolConfig);
-    };
-  }
-
-  get listAssetsInTargetTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'List assets discovered from a specific target by targetId. Params: targetId, page, limit, value (filter).',
-        parameters: listAssetsInTargetSchema,
-        execute: async (params: z.infer<typeof listAssetsInTargetSchema>) => {
-          const { targetId, limit, page, value } = params;
-          return this.assetsService.getManyAsssetServices(
-            {
-              limit: limit ?? 100,
-              page: page ?? 1,
-              targetIds: [targetId],
-              value,
-              sortBy: 'createdAt',
-              sortOrder: SortOrder.DESC,
-            },
-            workspaceId,
-          );
-        },
-      };
-      return tool(toolConfig);
-    };
-  }
-
-  get detailVulnTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'Get full vulnerability report with CVSS, PoC, remediation steps. Params: vulnId.',
-        parameters: detailVulnSchema,
-        execute: async (params: z.infer<typeof detailVulnSchema>) => {
-          const vulnId: string = (params.vulnId ?? params.id) as string;
-          return this.vulnerabilitiesService.getVulnerability(
-            vulnId,
-            workspaceId,
-          );
-        },
-      };
-      return tool(toolConfig);
-    };
-  }
-
-  get getPortsTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'List open network ports with asset counts. Params: page, limit, value (port number filter).',
-        parameters: getPortsSchema,
-        execute: async (params: z.infer<typeof getPortsSchema>) => {
-          const { page, limit, value } = params;
-          return this.assetsService.getPortAssets(
-            {
-              limit: limit ?? 100,
-              page: page ?? 1,
-              sortBy: 'createdAt',
-              sortOrder: SortOrder.DESC,
-              value,
-            },
-            workspaceId,
-          );
-        },
-      };
-      return tool(toolConfig);
-    };
-  }
-
-  get getTechnologiesTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'List detected technologies (software, frameworks, servers). Params: page, limit, value (filter by name).',
-        parameters: getTechnologiesSchema,
-        execute: async (params: z.infer<typeof getTechnologiesSchema>) => {
-          const { page, limit, value } = params;
-          return this.assetsService.getTechnologyAssets(
-            {
-              limit: limit ?? 100,
-              page: page ?? 1,
-              sortBy: 'createdAt',
-              sortOrder: SortOrder.DESC,
-              value,
-            },
-            workspaceId,
-          );
-        },
-      };
-      return tool(toolConfig);
-    };
-  }
-
-  get getTlsTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'List TLS/SSL certificates with issuer, subject, expiry. Params: page, limit, search (host name filter).',
-        parameters: getTlsSchema,
-        execute: async (params: z.infer<typeof getTlsSchema>) => {
-          const { page, limit, search } = params;
-          return this.assetsService.getManyTls(
-            {
-              limit: limit ?? 100,
-              page: page ?? 1,
-              sortBy: 'not_after',
-              sortOrder: SortOrder.ASC,
-              search,
-            },
-            workspaceId,
-          );
-        },
-      };
-      return tool(toolConfig);
-    };
-  }
-
-  get webFetchTool(): (workspaceId: string) => any {
-    return (_workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'HTTP GET to any public URL. Returns statusCode + body. Params: url.',
-        parameters: webFetchSchema,
-        execute: async (params: z.infer<typeof webFetchSchema>) => {
-          const { url: rawUrl } = params;
+  private createTool<T extends z.ZodTypeAny>(
+    description: string,
+    parameters: T,
+    execute: (params: z.infer<T>, workspaceId: string) => Promise<unknown>,
+    mapResponse?: (data: unknown) => unknown,
+  ): (workspaceId: string) => Tool {
+    return (workspaceId: string) =>
+      tool({
+        description,
+        inputSchema: parameters,
+        execute: async (params: z.infer<T>) => {
           try {
-            const parsedUrl = new URL(rawUrl);
-            if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-              return { error: 'Only http and https protocols are allowed', url: rawUrl };
-            }
-            const lookupAddresses = await dns.lookup(parsedUrl.hostname, { all: true });
-            for (const { address } of lookupAddresses) {
-              if (isPrivateAddress(address)) {
-                return { error: 'Request blocked: target address is not publicly accessible', url: rawUrl };
-              }
-            }
-            const response = await fetch(rawUrl, {
-              method: 'GET',
-              headers: { 'User-Agent': 'OASM-Security-Agent/1.0' },
-            });
-            return { statusCode: response.status, body: await response.text() };
+            const result = await execute(params, workspaceId);
+            return mapResponse ? mapResponse(result) : result;
           } catch (error) {
             return {
               error: error instanceof Error ? error.message : 'Unknown error',
-              url: rawUrl,
             };
           }
         },
-      };
-      return tool(toolConfig);
-    };
+      });
   }
 
-  get listIssuesTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'List security issues with status. Params: page, limit, search, status (OPEN/IN_PROGRESS/RESOLVED).',
-        parameters: listIssuesSchema,
-        execute: async (params: z.infer<typeof listIssuesSchema>) => {
-          const { page, limit, search, status } = params;
-          const response = await this.issuesService.getMany(
-            {
-              limit: limit ?? 100,
-              page: page ?? 1,
-              sortBy: 'createdAt',
-              sortOrder: SortOrder.DESC,
-              search,
-              status: status as any,
-            },
-            workspaceId,
-          );
-          return {
-            ...response,
-            data: response.data.map((i) => ({
-              id: i.id,
-              title: i.title,
-              status: i.status,
-              tags: i.tags,
-            })),
-          };
+  getAssetsTool = this.createTool(
+    'List discovered assets (domains, IPs, URLs) in the workspace. Params: page, limit, value (filter text).',
+    getAssetsSchema,
+    async (params, workspaceId) => {
+      const { page, limit, value } = params;
+      return this.assetsService.getManyAsssetServices(
+        {
+          limit: limit ?? 100,
+          page: page ?? 1,
+          sortBy: 'createdAt',
+          sortOrder: SortOrder.DESC,
+          value,
         },
-      };
-      return tool(toolConfig);
-    };
-  }
+        workspaceId,
+      );
+    },
+    (data: any) => ({
+      ...data,
+      data: data.data.map((i: any) => ({ id: i.id, value: i.value })),
+    }),
+  );
 
-  get detailIssueTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description: 'Get full details of a single issue by issueId.',
-        parameters: detailIssueSchema,
-        execute: async (params: z.infer<typeof detailIssueSchema>) => {
-          const { issueId } = params;
-          return this.issuesService.getById(issueId, workspaceId);
+  getVulnerabilitiesTool = this.createTool(
+    'List security vulnerabilities with severity. Params: page, limit, q (search e.g. "XSS", "CVE-2024").',
+    getVulnerabilitiesSchema,
+    async (params, workspaceId) => {
+      const { page, limit, q } = params;
+      return this.vulnerabilitiesService.getVulnerabilities(
+        {
+          limit: limit ?? 100,
+          page: page ?? 1,
+          q,
+          sortBy: 'createdAt',
+          sortOrder: SortOrder.DESC,
         },
-      };
-      return tool(toolConfig);
-    };
-  }
+        workspaceId,
+      );
+    },
+    (data: any) => ({
+      ...data,
+      data: data.data.map((i: any) => ({
+        id: i.id,
+        name: i.name,
+        severity: i.severity,
+      })),
+    }),
+  );
 
-  get listToolsTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'List installed security tools/scanners. Params: page, limit, q (search filter).',
-        parameters: listToolsSchema,
-        execute: async (params: z.infer<typeof listToolsSchema>) => {
-          const { page, limit, q } = params;
-          const response = await this.toolsService.getManyTools({
-            limit: limit ?? 100,
-            page: page ?? 1,
-            sortBy: 'createdAt',
-            sortOrder: SortOrder.DESC,
-            search: q,
+  getTargetsTool = this.createTool(
+    'Show scanning scope (root domains, IP ranges added by user). Params: page, limit, value (filter text).',
+    getTargetsSchema,
+    async (params, workspaceId) => {
+      const { page, limit, value } = params;
+      return this.targetsService.getTargetsInWorkspace(
+        {
+          limit: limit ?? 100,
+          page: page ?? 1,
+          sortBy: 'createdAt',
+          sortOrder: SortOrder.DESC,
+          value,
+        },
+        workspaceId,
+      );
+    },
+    (data: any) => ({
+      ...data,
+      data: data.data.map((i: any) => ({ id: i.id, value: i.value })),
+    }),
+  );
+
+  getStatisticsTool = this.createTool(
+    'Return security dashboard summary: asset/vulnerability counts, severity breakdown, security score. No params.',
+    z.object({}),
+    async (_params, workspaceId) =>
+      this.statisticService.getStatistics({ workspaceId }),
+  );
+
+  detailAssetTool = this.createTool(
+    'Get full technical details of a single asset by assetId.',
+    detailAssetSchema,
+    async (params, workspaceId) => {
+      const { assetId } = params;
+      return this.assetsService.getAssetById(assetId, workspaceId);
+    },
+  );
+
+  listAssetsInTargetTool = this.createTool(
+    'List assets discovered from a specific target by targetId. Params: targetId, page, limit, value (filter).',
+    listAssetsInTargetSchema,
+    async (params, workspaceId) => {
+      const { targetId, limit, page, value } = params;
+      return this.assetsService.getManyAsssetServices(
+        {
+          limit: limit ?? 100,
+          page: page ?? 1,
+          targetIds: [targetId],
+          value,
+          sortBy: 'createdAt',
+          sortOrder: SortOrder.DESC,
+        },
+        workspaceId,
+      );
+    },
+  );
+
+  detailVulnTool = this.createTool(
+    'Get full vulnerability report with CVSS, PoC, remediation steps. Params: vulnId.',
+    detailVulnSchema,
+    async (params, workspaceId) => {
+      const vulnId: string = (params.vulnId ?? params.id) as string;
+      return this.vulnerabilitiesService.getVulnerability(vulnId, workspaceId);
+    },
+  );
+
+  getPortsTool = this.createTool(
+    'List open network ports with asset counts. Params: page, limit, value (port number filter).',
+    getPortsSchema,
+    async (params, workspaceId) => {
+      const { page, limit, value } = params;
+      return this.assetsService.getPortAssets(
+        {
+          limit: limit ?? 100,
+          page: page ?? 1,
+          sortBy: 'createdAt',
+          sortOrder: SortOrder.DESC,
+          value,
+        },
+        workspaceId,
+      );
+    },
+  );
+
+  getTechnologiesTool = this.createTool(
+    'List detected technologies (software, frameworks, servers). Params: page, limit, value (filter by name).',
+    getTechnologiesSchema,
+    async (params, workspaceId) => {
+      const { page, limit, value } = params;
+      return this.assetsService.getTechnologyAssets(
+        {
+          limit: limit ?? 100,
+          page: page ?? 1,
+          sortBy: 'createdAt',
+          sortOrder: SortOrder.DESC,
+          value,
+        },
+        workspaceId,
+      );
+    },
+  );
+
+  getTlsTool = this.createTool(
+    'List TLS/SSL certificates with issuer, subject, expiry. Params: page, limit, search (host name filter).',
+    getTlsSchema,
+    async (params, workspaceId) => {
+      const { page, limit, search } = params;
+      return this.assetsService.getManyTls(
+        {
+          limit: limit ?? 100,
+          page: page ?? 1,
+          sortBy: 'not_after',
+          sortOrder: SortOrder.ASC,
+          search,
+        },
+        workspaceId,
+      );
+    },
+  );
+
+  webFetchTool(workspaceId: string): Tool {
+    return tool({
+      description:
+        'HTTP GET to any public URL. Returns statusCode + body. Params: url.',
+      inputSchema: webFetchSchema,
+      execute: async (params: z.infer<typeof webFetchSchema>) => {
+        const { url: rawUrl } = params;
+        try {
+          const parsedUrl = new URL(rawUrl);
+          if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+            return { error: 'Only http and https protocols are allowed', url: rawUrl };
+          }
+          const lookupAddresses = await dns.lookup(parsedUrl.hostname, { all: true });
+          for (const { address } of lookupAddresses) {
+            if (isPrivateAddress(address)) {
+              return { error: 'Request blocked: target address is not publicly accessible', url: rawUrl };
+            }
+          }
+          const response = await fetch(rawUrl, {
+            method: 'GET',
+            headers: { 'User-Agent': 'OASM-Security-Agent/1.0' },
           });
+          return { statusCode: response.status, body: await response.text() };
+        } catch (error) {
           return {
-            ...response,
-            data: response.data.map((i) => ({ id: i.id, name: i.name })),
+            error: error instanceof Error ? error.message : 'Unknown error',
+            url: rawUrl,
           };
-        },
-      };
-      return tool(toolConfig);
-    };
+        }
+      },
+    });
   }
 
-  get listWorkersTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'List connected worker nodes. Params: page, limit, q (search query).',
-        parameters: listWorkersSchema,
-        execute: async (params: z.infer<typeof listWorkersSchema>) => {
-          const { page, limit, q } = params;
-          const response = await this.workersService.getWorkers({
-            limit: limit ?? 100,
-            page: page ?? 1,
-            sortBy: 'createdAt',
-            sortOrder: SortOrder.DESC,
-            search: q,
-            workspaceId,
-            enabledAgentMode: true,
-          });
-          return {
-            ...response,
-            data: response.data.map((i) => ({ id: i.id, name: i.name })),
-          };
+  listIssuesTool = this.createTool(
+    'List security issues with status. Params: page, limit, search, status (OPEN/IN_PROGRESS/RESOLVED).',
+    listIssuesSchema,
+    async (params, workspaceId) => {
+      const { page, limit, search, status } = params;
+      const response = await this.issuesService.getMany(
+        {
+          limit: limit ?? 100,
+          page: page ?? 1,
+          sortBy: 'createdAt',
+          sortOrder: SortOrder.DESC,
+          search,
+          status: status as IssueStatus[],
         },
-      };
-      return tool(toolConfig);
-    };
-  }
+        workspaceId,
+      );
+      return response;
+    },
+    (data: any) => ({
+      ...data,
+      data: data.data.map((i: any) => ({
+        id: i.id,
+        title: i.title,
+        status: i.status,
+        tags: i.tags,
+      })),
+    }),
+  );
 
-  get listJobsTool(): (workspaceId: string) => any {
-    return (workspaceId: string) => {
-      const toolConfig: any = {
-        description:
-          'List background scan jobs with status. Params: page, limit, jobHistoryId, jobStatus (completed/failed/active).',
-        parameters: listJobsSchema,
-        execute: async (params: z.infer<typeof listJobsSchema>) => {
-          const { page, limit, jobHistoryId, jobStatus } = params;
-          const response = await this.jobsRegistryService.getManyJobs({
-            limit: limit ?? 100,
-            page: page ?? 1,
-            sortBy: 'createdAt',
-            sortOrder: SortOrder.DESC,
-            jobHistoryId,
-            jobStatus,
-          });
-          return {
-            ...response,
-            data: response.data.map((i) => ({ id: i.id, status: i.status })),
-          };
-        },
-      };
-      return tool(toolConfig);
-    };
-  }
+  detailIssueTool = this.createTool(
+    'Get full details of a single issue by issueId.',
+    detailIssueSchema,
+    async (params, workspaceId) => {
+      const { issueId } = params;
+      return this.issuesService.getById(issueId, workspaceId);
+    },
+  );
+
+  listToolsTool = this.createTool(
+    'List installed security tools/scanners. Params: page, limit, q (search filter).',
+    listToolsSchema,
+    async (params, _workspaceId) => {
+      const { page, limit, q } = params;
+      return this.toolsService.getManyTools({
+        limit: limit ?? 100,
+        page: page ?? 1,
+        sortBy: 'createdAt',
+        sortOrder: SortOrder.DESC,
+        search: q,
+      });
+    },
+    (data: any) => ({
+      ...data,
+      data: data.data.map((i: any) => ({ id: i.id, name: i.name })),
+    }),
+  );
+
+  listWorkersTool = this.createTool(
+    'List connected worker nodes. Params: page, limit, q (search query).',
+    listWorkersSchema,
+    async (params, workspaceId) => {
+      const { page, limit, q } = params;
+      return this.workersService.getWorkers({
+        limit: limit ?? 100,
+        page: page ?? 1,
+        sortBy: 'createdAt',
+        sortOrder: SortOrder.DESC,
+        search: q,
+        workspaceId,
+        enabledAgentMode: true,
+      });
+    },
+    (data: any) => ({
+      ...data,
+      data: data.data.map((i: any) => ({ id: i.id, name: i.name })),
+    }),
+  );
+
+  listJobsTool = this.createTool(
+    'List background scan jobs with status. Params: page, limit, jobHistoryId, jobStatus (completed/failed/active).',
+    listJobsSchema,
+    async (params, _workspaceId) => {
+      const { page, limit, jobHistoryId, jobStatus } = params;
+      return this.jobsRegistryService.getManyJobs({
+        limit: limit ?? 100,
+        page: page ?? 1,
+        sortBy: 'createdAt',
+        sortOrder: SortOrder.DESC,
+        jobHistoryId,
+        jobStatus,
+      });
+    },
+    (data: any) => ({
+      ...data,
+      data: data.data.map((i: any) => ({ id: i.id, status: i.status })),
+    }),
+  );
 
   remoteExecuteTool(
     workspaceId: string,
     conversationId: string,
     emitter?: EventEmitter,
-  ): ToolType {
-    const toolConfig: any = {
+  ): Tool {
+    const toolConfig = {
       description: [
         'Execute arbitrary shell commands on remote worker nodes (nmap, curl, dig, etc.).',
         'Params: command (required shell command string).',
         'Output: stdout, stderr, exitCode, error, timedOut.',
         'Warning: OS-level permissions, no PTY, strict timeout.',
       ].join('\n'),
-      parameters: z.object({
+      inputSchema: z.object({
         command: z.string().min(1).describe('Shell command to execute'),
       }),
       execute: async (
@@ -553,7 +480,7 @@ export class AgentTool {
   getTodoTools(
     conversationId: string,
     emitter?: EventEmitter,
-  ): Record<string, ToolType> {
+  ): Record<string, Tool> {
     const todoRepo = this.todoRepository;
 
     /**
@@ -655,10 +582,10 @@ export class AgentTool {
       }
     };
 
-    const setPlanTool: any = {
+    const setPlanTool = {
       description:
         'Set/reset execution plan with step array. Params: steps (string[]). Output: success, message, todos. ONLY call this when no active plan exists (all steps completed/failed, or plan is empty). If a plan is already in progress, you MUST execute existing steps — do NOT call this tool.',
-      parameters: z.object({
+      inputSchema: z.object({
         steps: z.array(z.string().min(1)).min(1).describe('Plan steps'),
       }),
       execute: async (params: { steps: string[] }) => {
@@ -799,10 +726,10 @@ export class AgentTool {
       },
     };
 
-    const updateTodoStatusTool: any = {
+    const updateTodoStatusTool = {
       description:
         'Update the status of a specific step in the execution plan. You MUST call this at two points: (1) BEFORE starting work on a step — call transition_step(id, "in_progress"), and (2) AFTER finishing work on a step — call transition_step(id, "completed") or transition_step(id, "failed"). ALWAYS transition the current step before moving to the next sequential step. NEVER skip steps. NEVER call this for a step that is not your current step. Params: id (UUID of the step), status (pending/in_progress/completed/failed).',
-      parameters: z.object({
+      inputSchema: z.object({
         id: z.string().uuid().describe('Todo item ID'),
         status: z
           .enum(['pending', 'in_progress', 'completed', 'failed'])
@@ -877,10 +804,10 @@ export class AgentTool {
       },
     };
 
-    const addTodoTool: any = {
+    const addTodoTool = {
       description:
         'Append a new step to the plan. Params: content (string). ONLY use when you genuinely discover a new requirement during execution that was not part of the original plan. Do NOT use to re-create steps you forgot to add earlier — finish the current step first.',
-      parameters: z.object({
+      inputSchema: z.object({
         content: z.string().min(1).describe('Todo content'),
       }),
       execute: async (params: { content: string }) => {
@@ -935,10 +862,10 @@ export class AgentTool {
       },
     };
 
-    const clearPlanTool: any = {
+    const clearPlanTool = {
       description:
         'Clear entire plan (irreversible). Then call formulate_plan to create a new one.',
-      parameters: z.object({}),
+      inputSchema: z.object({}),
       execute: async () => {
         try {
           await todoRepo.delete({ conversationId });
@@ -967,14 +894,14 @@ export class AgentTool {
     workspaceId: string,
     userId: string,
     conversationId: string,
-  ): Record<string, ToolType> {
+  ): Record<string, Tool> {
     const memoriesService = this.agentsMemories;
 
-    const stmWriteTool: any = {
+    const stmWriteTool = {
       description:
         'Save a key-value pair to short-term memory (conversation scope). ' +
         'Use this to remember important findings during execution (e.g., discovered IPs, scan results, target info).',
-      parameters: z.object({
+      inputSchema: z.object({
         key: z
           .string()
           .min(1)
@@ -1005,9 +932,9 @@ export class AgentTool {
       },
     };
 
-    const stmReadTool: any = {
+    const stmReadTool = {
       description: 'Read a value from short-term memory by key.',
-      parameters: z.object({
+      inputSchema: z.object({
         key: z.string().describe('Memory key to read'),
       }),
       execute: async (params: { key: string }) => {
@@ -1039,9 +966,9 @@ export class AgentTool {
       },
     };
 
-    const stmListTool: any = {
+    const stmListTool = {
       description: 'List all short-term memory entries for this conversation.',
-      parameters: z.object({}),
+      inputSchema: z.object({}),
       execute: async () => {
         try {
           const entries = await memoriesService.stmGetAll(conversationId);
@@ -1064,11 +991,11 @@ export class AgentTool {
       },
     };
 
-    const ltmWriteTool: any = {
+    const ltmWriteTool = {
       description:
         'Save important information to long-term memory (workspace scope, persists across conversations). ' +
         'Use this for persistent knowledge like target profiles, known vulnerabilities, organizational policies.',
-      parameters: z.object({
+      inputSchema: z.object({
         content: z
           .string()
           .min(1)
@@ -1089,10 +1016,10 @@ export class AgentTool {
       },
     };
 
-    const ltmAppendTool: any = {
+    const ltmAppendTool = {
       description:
         'Append information to existing long-term memory (keeps previous content).',
-      parameters: z.object({
+      inputSchema: z.object({
         content: z
           .string()
           .min(1)
@@ -1120,9 +1047,9 @@ export class AgentTool {
       },
     };
 
-    const ltmReadTool: any = {
+    const ltmReadTool = {
       description: 'Read the current long-term memory content.',
-      parameters: z.object({}),
+      inputSchema: z.object({}),
       execute: async () => {
         try {
           const record = await memoriesService.ltmGet(workspaceId, userId);
@@ -1151,11 +1078,11 @@ export class AgentTool {
     emitter?: EventEmitter,
     conversationId?: string,
     mcpOnly = false,
-  ): Record<string, ToolType> {
+  ): Record<string, Tool> {
     const { AGENT, ASK } = AgentMode;
     const tools: Record<
       string,
-      { method: ToolType; permissions: AgentMode[]; mcp: boolean }
+      { method: Tool; permissions: AgentMode[]; mcp: boolean }
     > = {
       enumerate_assets: {
         method: this.getAssetsTool(workspaceId),
@@ -1253,6 +1180,6 @@ export class AgentTool {
         .filter(([, config]) => config.permissions.includes(agentMode))
         .filter(([, config]) => (mcpOnly ? config.mcp : true))
         .map(([key, config]) => [key, config.method]),
-    ) as Record<string, ToolType>;
+    );
   }
 }
