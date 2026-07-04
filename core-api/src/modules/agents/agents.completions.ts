@@ -83,6 +83,19 @@ export class AgentsCompletionsService {
   private static readonly DEFAULT_CONTEXT_WINDOW = 128000;
   private static readonly COMPACTION_THRESHOLD_RATIO = 0.6;
 
+  private static extractTextFromLLMResponse(result: {
+    content: string | ReadonlyArray<{ type: string; text?: string }>;
+  }): string {
+    if (typeof result.content === 'string') {
+      return result.content;
+    }
+    if (Array.isArray(result.content)) {
+      const textPart = result.content.find((part) => part.type === 'text');
+      return textPart && typeof textPart.text === 'string' ? textPart.text : '';
+    }
+    return '';
+  }
+
   constructor(
     @InjectRepository(AgentLLMConfig)
     private readonly llmConfigRepository: Repository<AgentLLMConfig>,
@@ -273,15 +286,8 @@ export class AgentsCompletionsService {
         messages: [{ role: 'user', content: prompt }],
       });
 
-      let titleText = '';
-      if (typeof titleResult.content === 'string') {
-        titleText = titleResult.content;
-      } else if (Array.isArray(titleResult.content)) {
-        const textPart = titleResult.content.find(
-          (part) => part.type === 'text',
-        );
-        titleText = textPart?.type === 'text' ? textPart.text : '';
-      }
+      const titleText =
+        AgentsCompletionsService.extractTextFromLLMResponse(titleResult);
 
       const title = titleText.trim().slice(0, 500);
 
@@ -739,18 +745,8 @@ export class AgentsCompletionsService {
         messages: [{ role: 'user', content: prompt }],
       });
 
-      let summaryText = '';
-      if (typeof result.content === 'string') {
-        summaryText = result.content;
-      } else if (Array.isArray(result.content)) {
-        const textPart = result.content.find(
-          (part: { type: string }) => part.type === 'text',
-        );
-        summaryText =
-          textPart && 'text' in textPart
-            ? (textPart as { text: string }).text
-            : '';
-      }
+      const summaryText =
+        AgentsCompletionsService.extractTextFromLLMResponse(result);
 
       const cleanedSummary = summaryText.trim();
 
@@ -954,18 +950,8 @@ export class AgentsCompletionsService {
         messages: [{ role: 'user', content: prompt }],
       });
 
-      let summaryText = '';
-      if (typeof result.content === 'string') {
-        summaryText = result.content;
-      } else if (Array.isArray(result.content)) {
-        const textPart = result.content.find(
-          (part: { type: string }) => part.type === 'text',
-        );
-        summaryText =
-          textPart && 'text' in textPart
-            ? (textPart as { text: string }).text
-            : '';
-      }
+      const summaryText =
+        AgentsCompletionsService.extractTextFromLLMResponse(result);
 
       const cleanedSummary = summaryText.trim();
 
