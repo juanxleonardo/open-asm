@@ -5,6 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { tool } from 'ai';
 import { randomUUID } from 'node:crypto';
 import * as dns from 'node:dns/promises';
+import * as net from 'node:net';
 import { EventEmitter } from 'node:events';
 import { Repository } from 'typeorm';
 import { z } from 'zod';
@@ -50,7 +51,17 @@ const webFetchSchema = z.object({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ToolType = any;
 
-function isPrivateIp(ip: string): boolean {
+function isPrivateAddress(address: string): boolean {
+  if (net.isIPv4(address)) {
+    return isPrivateV4(address);
+  }
+  if (net.isIPv6(address)) {
+    return isPrivateV6(address);
+  }
+  return false;
+}
+
+function isPrivateV4(ip: string): boolean {
   const parts = ip.split('.').map(Number);
   if (parts.length !== 4 || parts.some(isNaN)) return false;
   const [a, b] = parts;
@@ -59,8 +70,26 @@ function isPrivateIp(ip: string): boolean {
   if (a === 169 && b === 254) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
   if (a === 0) return true;
+  return false;
+}
+
+function isPrivateV6(ip: string): boolean {
+  const normalized = ip.toLowerCase();
+  // Loopback ::1
+  if (normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') return true;
+  // Unspecified ::
+  if (normalized === '::' || normalized === '0:0:0:0:0:0:0:0') return true;
+  // Link-local fe80::/10
+  if (normalized.startsWith('fe80:')) return true;
+  // Unique Local Address fc00::/7 (fc00:: - fdff::)
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+  // IPv4-mapped IPv6 ::ffff:x.x.x.x
+  const v4mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (v4mapped) {
+    return isPrivateV4(v4mapped[1]);
+  }
   return false;
 }
 
@@ -333,9 +362,9 @@ export class AgentTool {
             if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
               return { error: 'Only http and https protocols are allowed', url: rawUrl };
             }
-            const addresses = await dns.resolve4(parsedUrl.hostname);
-            for (const ip of addresses) {
-              if (isPrivateIp(ip)) {
+            const lookupAddresses = await dns.lookup(parsedUrl.hostname, { all: true });
+            for (const { address } of lookupAddresses) {
+              if (isPrivateAddress(address)) {
                 return { error: 'Request blocked: target address is not publicly accessible', url: rawUrl };
               }
             }
