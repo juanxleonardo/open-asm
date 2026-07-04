@@ -799,10 +799,11 @@ export class AgentsCompletionsService {
    * - Current todo list
    */
   private async buildSystemContext(
-    conversation: AgentConversation,
+    conversation: Pick<AgentConversation, 'id' | 'summary'>,
     workspaceId: string,
     agentMode: AgentMode,
     userId?: string,
+    extraParts?: string[],
   ): Promise<string[]> {
     // Fetch prompt for the current mode (e.g. ASK.md, AGENT.md)
     const modePrompt = this.getPrompt(`${agentMode.toUpperCase()}.md`);
@@ -840,7 +841,7 @@ export class AgentsCompletionsService {
       : '';
 
     // Combine all context parts, filtering out empty ones
-    return [
+    const contextParts = [
       modePrompt,
       systemPrompt,
       summaryContext,
@@ -849,6 +850,10 @@ export class AgentsCompletionsService {
       stmContext,
       todosContext,
     ].filter(Boolean);
+    if (extraParts?.length) {
+      contextParts.push(...extraParts);
+    }
+    return contextParts;
   }
 
   /**
@@ -1400,59 +1405,18 @@ export class AgentsCompletionsService {
                 currentModelMessages,
               );
               if (compacted) {
-                // Re-fetch context after compaction
                 const postCompactConversation =
                   await this.conversationRepository.findOne({
                     where: { id: conversationId },
                   });
                 if (postCompactConversation?.summary) {
-                  // Refresh context with updated summary
-                  const agentModeVal = agentMode || AgentMode.ASK;
-                  const modePrompt = this.getPrompt(
-                    `${agentModeVal.toUpperCase()}.md`,
+                  currentContextParts = await this.buildSystemContext(
+                    postCompactConversation,
+                    workspaceId,
+                    agentMode || AgentMode.ASK,
+                    userId,
+                    skillsContext ? [skillsContext] : undefined,
                   );
-                  const systemPrompt = this.getPrompt('SYSTEM.md');
-                  const now = new Date();
-                  const currentTimeContext = `Current time: ${now.toISOString()} (${now.toLocaleString('en-US', { timeZoneName: 'short' })})`;
-                  const [stmCtx, ltmCtx] = await Promise.all([
-                    this.agentsMemories.stmFormatForPrompt(conversationId),
-                    userId
-                      ? this.agentsMemories.ltmFormatForPrompt(
-                          workspaceId,
-                          userId,
-                        )
-                      : Promise.resolve(''),
-                  ]);
-                  const postCompactTodos = await this.todoRepository.find({
-                    where: { conversationId },
-                    order: { sortOrder: 'ASC' },
-                  });
-                  const todosCtx = formatTodosToPrompt(
-                    postCompactTodos.map((t) => ({
-                      id: t.id,
-                      content: t.content,
-                      status: t.status,
-                      sortOrder: t.sortOrder,
-                      updatedAt: t.updatedAt.toISOString(),
-                    })),
-                  );
-                  const summaryCtx = postCompactConversation.summary
-                    ? `[PREVIOUS CONVERSATION SUMMARY]:\n${postCompactConversation.summary}`
-                    : '';
-
-                  currentContextParts = [
-                    modePrompt,
-                    systemPrompt,
-                    summaryCtx,
-                    currentTimeContext,
-                    ltmCtx,
-                    stmCtx,
-                    todosCtx,
-                  ].filter(Boolean);
-
-                  if (skillsContext) {
-                    currentContextParts.push(skillsContext);
-                  }
                 }
               }
             }
@@ -1581,49 +1545,13 @@ export class AgentsCompletionsService {
                 where: { id: conversationId },
               });
             if (updatedConversation) {
-              // Build system context fresh
-              const agentModeVal = agentMode || AgentMode.ASK;
-              const modePrompt = this.getPrompt(
-                `${agentModeVal.toUpperCase()}.md`,
+              currentContextParts = await this.buildSystemContext(
+                updatedConversation,
+                workspaceId,
+                agentMode || AgentMode.ASK,
+                userId,
+                skillsContext ? [skillsContext] : undefined,
               );
-              const systemPrompt = this.getPrompt('SYSTEM.md');
-              const now = new Date();
-              const currentTimeContext = `Current time: ${now.toISOString()} (${now.toLocaleString('en-US', { timeZoneName: 'short' })})`;
-              const [stmContext, ltmContext] = await Promise.all([
-                this.agentsMemories.stmFormatForPrompt(conversationId),
-                userId
-                  ? this.agentsMemories.ltmFormatForPrompt(workspaceId, userId)
-                  : Promise.resolve(''),
-              ]);
-              const updatedTodoEntities = await this.todoRepository.find({
-                where: { conversationId },
-                order: { sortOrder: 'ASC' },
-              });
-              const updatedTodos = updatedTodoEntities.map((t) => ({
-                id: t.id,
-                content: t.content,
-                status: t.status,
-                sortOrder: t.sortOrder,
-                updatedAt: t.updatedAt.toISOString(),
-              }));
-              const todosContext = formatTodosToPrompt(updatedTodos);
-              const summaryContext = updatedConversation.summary
-                ? `[PREVIOUS CONVERSATION SUMMARY]:\n${updatedConversation.summary}`
-                : '';
-
-              currentContextParts = [
-                modePrompt,
-                systemPrompt,
-                summaryContext,
-                currentTimeContext,
-                ltmContext,
-                stmContext,
-                todosContext,
-              ].filter(Boolean);
-
-              if (skillsContext) {
-                currentContextParts.push(skillsContext);
-              }
             }
 
             this.logger.log(
