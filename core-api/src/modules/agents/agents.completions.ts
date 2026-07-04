@@ -208,7 +208,7 @@ export class AgentsCompletionsService {
     }
 
     const now = Date.now();
-    let toolModels = this.toolCapableModelsCache.get('openrouter');
+    let toolModels = this.toolCapableModelsCache.get(LLMProvider.OPENROUTER);
 
     if (!toolModels || now > this.toolCapableCacheExpiry) {
       try {
@@ -222,7 +222,7 @@ export class AgentsCompletionsService {
               .filter((m) => m.supported_parameters?.includes('tools'))
               .map((m) => m.id),
           );
-          this.toolCapableModelsCache.set('openrouter', toolModels);
+          this.toolCapableModelsCache.set(LLMProvider.OPENROUTER, toolModels);
           this.toolCapableCacheExpiry =
             now + AgentsCompletionsService.TOOL_CACHE_TTL_MS;
         }
