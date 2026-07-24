@@ -2,7 +2,7 @@ from telegram.ext import Updater, CommandHandler
 from models import db, User
 from app import app
 
-TOKEN = '7835569666:AAEqMoQygkD7fUp46MK5xYv54TwkuMb0x40'  # Replace with your bot token
+TOKEN = '7835569666:asdasd'  # Replace with your bot token
 
 def start(update, context):
     args = context.args
