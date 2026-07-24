@@ -3,7 +3,7 @@ from models import db, User
 from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///noairdrop.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///xxxx.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db.init_app(app)
